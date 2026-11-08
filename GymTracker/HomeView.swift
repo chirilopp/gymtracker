@@ -52,7 +52,11 @@ struct CalendarCard: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
                     ForEach(0..<grid.count, id: \.self) { i in
                         if let day = grid[i] {
-                            DayCell(date: day, list: byDay[c.startOfDay(for: day)] ?? [],
+                            let dayList = byDay[c.startOfDay(for: day)] ?? []
+                            let todayStart = c.startOfDay(for: Date())
+                            let plannedHere = (dayList.isEmpty && c.startOfDay(for: day) >= todayStart)
+                                ? store.db.templates.filter { $0.days.contains(weekdayMonFirst(day)) } : []
+                            DayCell(date: day, list: dayList, planned: plannedHere,
                                     isToday: c.isDateInToday(day),
                                     isSelected: selected.map { c.isDate($0, inSameDayAs: day) } ?? false) { selected = day }
                         } else {
@@ -69,6 +73,7 @@ private struct DayCell: View {
     @Environment(Store.self) private var store
     let date: Date
     let list: [Workout]
+    let planned: [Template]
     let isToday: Bool
     let isSelected: Bool
     let onTap: () -> Void
@@ -89,6 +94,14 @@ private struct DayCell: View {
                     Text(store.label(w) + (list.count > 1 ? " +\(list.count - 1)" : ""))
                         .font(.system(size: 9)).foregroundStyle(Color.gMuted)
                         .multilineTextAlignment(.center).lineLimit(2)
+                } else if let t = planned.first {
+                    Text("план")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(Color.gRed)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .overlay(Capsule().stroke(Color.gRed, lineWidth: 1))
+                    Text(t.name + (planned.count > 1 ? " +\(planned.count - 1)" : ""))
+                        .font(.system(size: 9)).foregroundStyle(Color.gMuted)
+                        .multilineTextAlignment(.center).lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }
@@ -98,6 +111,13 @@ private struct DayCell: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+private struct PlannedEntry: Identifiable {
+    let id = UUID()
+    let date: Date
+    let template: Template
+    let workout: Workout?
 }
 
 struct HomeView: View {
@@ -117,13 +137,57 @@ struct HomeView: View {
 
                 if let a = store.active { activeBanner(a) }
 
+                SectionTitle("Следующие тренировки")
+                let plan = weekPlan(all: all)
+                if plan.isEmpty {
+                    Text("Назначьте дни недели шаблонам: Ещё → Шаблоны → выберите шаблон → «Дни тренировок». Тренировки на этой неделе появятся здесь.")
+                        .font(.system(size: 13)).foregroundStyle(Color.gMuted).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(plan) { p in
+                    Button {
+                        if let w = p.workout { openWorkout = w.id } else { openWorkout = store.startWorkout(templateId: p.template.id) }
+                    } label: {
+                        Card {
+                            HStack(spacing: 14) {
+                                ProgressRing(percent: p.workout?.completion ?? 0, diameter: 56)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(fmtDate(p.date, "EEE, d MMMM").capitalized).font(.system(size: 14)).foregroundStyle(Color.gMuted)
+                                    Text(p.template.name).font(.system(size: 20, weight: .bold))
+                                }
+                                Spacer()
+                                if ruCalendar.isDateInToday(p.date) { Circle().fill(Color.gRed).frame(width: 12, height: 12) }
+                            }
+                        }
+                    }.buttonStyle(.plain)
+                }
+
                 CalendarCard(workouts: all, selected: $selectedDay)
 
                 if let day = selectedDay {
                     let c = ruCalendar
                     let list = all.filter { c.isDate($0.startedAt, inSameDayAs: day) }
                     Text(fmtDate(day, "EEEE, d MMMM").capitalized).font(.system(size: 17, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                    if list.isEmpty { Text("В этот день тренировок нет.").foregroundStyle(Color.gMuted).frame(maxWidth: .infinity, alignment: .leading) }
+                    let todayStart = c.startOfDay(for: Date())
+                    let dayStart = c.startOfDay(for: day)
+                    let plannedOnDay = store.db.templates.filter { t in
+                        dayStart >= todayStart && t.days.contains(weekdayMonFirst(day)) && !list.contains { w in w.title == t.name }
+                    }
+                    if list.isEmpty && plannedOnDay.isEmpty { Text("В этот день тренировок нет.").foregroundStyle(Color.gMuted).frame(maxWidth: .infinity, alignment: .leading) }
+                    ForEach(plannedOnDay) { t in
+                        Button { if dayStart == todayStart { openWorkout = store.startWorkout(templateId: t.id) } } label: {
+                            Card {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(t.name).font(.system(size: 18, weight: .bold))
+                                        Text(dayStart == todayStart ? "Запланирована на сегодня — нажмите, чтобы начать" : "Запланирована")
+                                            .font(.system(size: 13)).foregroundStyle(Color.gMuted)
+                                    }
+                                    Spacer()
+                                    if dayStart == todayStart { Image(systemName: "chevron.right").foregroundStyle(Color.gRed) }
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    }
                     ForEach(list) { w in
                         NavigationLink(value: Route.workout(w.id)) {
                             Card {
@@ -153,7 +217,7 @@ struct HomeView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(t.name).font(.system(size: 18, weight: .bold))
-                                    Text("Упражнений: \(t.items.count)").font(.system(size: 12)).foregroundStyle(Color.gRed)
+                                    Text("Упражнений: \(t.items.count) · \(daysLabel(t.days))").font(.system(size: 12)).foregroundStyle(Color.gRed)
                                     Text(t.items.compactMap { store.exercise($0.exerciseId)?.name }.joined(separator: " · "))
                                         .font(.system(size: 12)).foregroundStyle(Color.gMuted).lineLimit(2).multilineTextAlignment(.leading)
                                 }
@@ -191,6 +255,22 @@ struct HomeView: View {
         .background(Color.gBg)
         .navigationBarHidden(true)
         .navigationDestination(item: $openWorkout) { WorkoutView(workoutId: $0) }
+    }
+
+    /// Тренировки текущей недели (Пн–Вс) по назначенным дням шаблонов.
+    private func weekPlan(all: [Workout]) -> [PlannedEntry] {
+        let c = ruCalendar
+        let today = c.startOfDay(for: Date())
+        guard let monday = c.date(byAdding: .day, value: -(weekdayMonFirst(today) - 1), to: today) else { return [] }
+        var out: [PlannedEntry] = []
+        for d in 0..<7 {
+            guard let date = c.date(byAdding: .day, value: d, to: monday) else { continue }
+            for t in store.db.templates where t.days.contains(weekdayMonFirst(date)) {
+                let w = all.first { c.isDate($0.startedAt, inSameDayAs: date) && $0.title == t.name }
+                out.append(PlannedEntry(date: date, template: t, workout: w))
+            }
+        }
+        return out
     }
 
     private func restSummary(_ now: Date) -> String {

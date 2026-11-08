@@ -71,6 +71,32 @@ struct Template: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
     var items: [TemplateItem] = []
+    /// Дни недели тренировки: 1 = Пн ... 7 = Вс.
+    var days: [Int] = []
+
+    enum CodingKeys: String, CodingKey { case id, name, items, days }
+
+    init(id: UUID = UUID(), name: String, items: [TemplateItem] = [], days: [Int] = []) {
+        self.id = id; self.name = name; self.items = items; self.days = days
+    }
+
+    // Старые копии без поля days читаются как «дни не назначены».
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        items = try c.decodeIfPresent([TemplateItem].self, forKey: .items) ?? []
+        days = try c.decodeIfPresent([Int].self, forKey: .days) ?? []
+    }
+}
+
+/// Номер дня недели с понедельника: Пн = 1 ... Вс = 7.
+func weekdayMonFirst(_ d: Date) -> Int { (Calendar.current.component(.weekday, from: d) + 5) % 7 + 1 }
+
+let weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+func daysLabel(_ days: [Int]) -> String {
+    days.isEmpty ? "дни не назначены" : days.sorted().filter { (1...7).contains($0) }.map { weekdayShort[$0 - 1] }.joined(separator: ", ")
 }
 
 struct AppSettings: Codable, Hashable {

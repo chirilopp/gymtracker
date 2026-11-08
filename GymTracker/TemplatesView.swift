@@ -21,7 +21,7 @@ struct TemplatesView: View {
                                 NavigationLink(value: Route.template(t.id)) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(t.name).font(.system(size: 18, weight: .bold))
-                                        Text("Упражнений: \(t.items.count)").font(.system(size: 13)).foregroundStyle(Color.gMuted)
+                                        Text("Упражнений: \(t.items.count) · \(daysLabel(t.days))").font(.system(size: 13)).foregroundStyle(Color.gMuted)
                                     }
                                 }.buttonStyle(.plain)
                                 Spacer()
@@ -68,6 +68,24 @@ struct TemplateEditView: View {
                                 if !n.trimmingCharacters(in: .whitespaces).isEmpty { store.mutateTemplate(templateId) { $0.name = n } }
                             }
                     }
+                    Section {
+                        HStack(spacing: 4) {
+                            ForEach(1...7, id: \.self) { d in
+                                let on = t.days.contains(d)
+                                Button {
+                                    store.mutateTemplate(templateId) { tt in
+                                        if let i = tt.days.firstIndex(of: d) { tt.days.remove(at: i) } else { tt.days.append(d) }
+                                    }
+                                } label: {
+                                    Text(weekdayShort[d - 1]).font(.system(size: 14, weight: .bold))
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .foregroundStyle(on ? Color.white : Color.gMuted)
+                                        .background(on ? Color.gRed : Color.gCard2, in: RoundedRectangle(cornerRadius: 10))
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        .listRowBackground(Color.clear)
+                    } header: { Text("Дни тренировок") }
                     Section {
                         if t.items.isEmpty { Text("В шаблоне пока нет упражнений.").foregroundStyle(Color.gMuted) }
                         ForEach(t.items) { item in
